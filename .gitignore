@@ -5,3 +5,5 @@ dll.cbp
 *.cbp
 *.depend
 *.layout
+main.i
+*_build_log.html

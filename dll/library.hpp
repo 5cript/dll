@@ -8,14 +8,23 @@
 #include <stdexcept>
 #include <iomanip>
 #include <unordered_map>
-#include <functional>
+
+#include <iostream>
 
 // boost pp
 #include <boost/preprocessor/seq/for_each.hpp>
 #include <boost/preprocessor/seq/for_each_i.hpp>
 #include <boost/preprocessor/seq/elem.hpp>
+#include <boost/preprocessor/seq/enum.hpp>
+
 #include <boost/preprocessor/stringize.hpp>
+#include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/punctuation/comma_if.hpp>
+#include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/facilities/empty.hpp>
+#include <boost/preprocessor/punctuation/comma.hpp>
+
+#include <boost/preprocessor/tuple/elem.hpp>
 
 BOOL CALLBACK _SymProc_(
     PSYMBOL_INFO symInfo,
@@ -49,9 +58,9 @@ namespace LibraryLoader
             , dll_{LoadLibrary(library.c_str())}
             , symbols_{}
         {
-            if (!dll_)
+            if (dll_ == nullptr)
             {
-                throw std::invalid_argument("could not load dll specified");
+                throw std::invalid_argument("could not load dll specified - code: " + std::to_string(GetLastError()));
             }
         }
 
@@ -143,6 +152,36 @@ namespace LibraryLoader
 
         std::unordered_map <std::string, Symbol> symbols_;
     };
+
+
+    template <typename CallConvention>
+    struct LibraryLoaderDelegate
+    {
+        template <typename FunctionType, bool = true>
+        struct TemplateCurry
+        {
+        };
+
+        template <typename R, typename... Args, bool PartialSpecializationTrick>
+        struct TemplateCurry <std::function <R(Args...)>, PartialSpecializationTrick>
+        {
+            template <typename StringT>
+            static auto extract(Library* lib) -> std::function <typename FunctionPointerType <R(Args...), CallConvention>::type(StringT&&)>
+            {
+                return [lib](StringT&& name) -> typename FunctionPointerType <R(Args...), CallConvention>::type {
+                    return lib->get<R(Args...)>(std::forward <StringT&&>(name));
+                };
+            }
+
+            /*
+            template <typename StringT>
+            auto extract(Library* lib, StringT&& name) -> typename FunctionPointerType <R(Args...), CallConvention>::type
+            {
+                return lib->get<R(Args...)>(std::forward <StringT&&> (name));
+            }
+            */
+        };
+    };
 }
 
 BOOL CALLBACK _SymProc_(
@@ -155,10 +194,66 @@ BOOL CALLBACK _SymProc_(
     return true;
 }
 
-/* (free_buffer, void(char*))
-   (wiki_markup, int32_t(const char*, char**))
+#define DLL_FUNCTION std::function
 
+#define SEQUENCE_FACTORY_0(...) \
+     ((__VA_ARGS__)) SEQUENCE_FACTORY_1
+#define SEQUENCE_FACTORY_1(...) \
+     ((__VA_ARGS__)) SEQUENCE_FACTORY_0
+#define SEQUENCE_FACTORY_0_END
+#define SEQUENCE_FACTORY_1_END
+
+#define DLL_FIELD_DECLARATOR(r, data, field_tuple) \
+    BOOST_PP_TUPLE_ELEM(0, field_tuple) BOOST_PP_TUPLE_ELEM(1, field_tuple);
+
+#define DLL_FIELD_CONSTRUCTOR(r, data, field_tuple) \
+    (BOOST_PP_TUPLE_ELEM(0, field_tuple) const& BOOST_PP_CAT(BOOST_PP_TUPLE_ELEM(1, field_tuple), _))
+
+#define DLL_FIELD_INITIALIZER(r, data, field_tuple) \
+    ( \
+        BOOST_PP_TUPLE_ELEM(1, field_tuple) { \
+            LibraryLoader::LibraryLoaderDelegate < \
+                LibraryLoader::DefaultCall \
+            >::template TemplateCurry < \
+                BOOST_PP_TUPLE_ELEM(0, field_tuple) \
+            >::extract<std::string&&>(data)( \
+                BOOST_PP_STRINGIZE(BOOST_PP_TUPLE_ELEM(1, field_tuple)) \
+            ) \
+        } \
+    )
+
+/*
+#define DLL_DECLARE_INTERFACE_IMPL(name, fields) \
+    struct name \
+    { \
+        BOOST_PP_SEQ_FOR_EACH(DLL_FIELD_DECLARATOR,, fields) \
+        \
+        name(BOOST_PP_SEQ_ENUM(BOOST_PP_SEQ_FOR_EACH(DLL_FIELD_CONSTRUCTOR,, fields))) \
+            : BOOST_PP_IF(1, BOOST_PP_SEQ_ENUM( \
+                  BOOST_PP_SEQ_FOR_EACH(DLL_FIELD_INITIALIZER,, fields) \
+              ), BOOST_PP_EMPTY)() \
+        { \
+        } \
+    };
 */
+
+#define DLL_DECLARE_INTERFACE_IMPL(name, fields) \
+    struct name \
+    { \
+        BOOST_PP_SEQ_FOR_EACH(DLL_FIELD_DECLARATOR,, fields) \
+        \
+        name(LibraryLoader::Library* library) \
+            : BOOST_PP_SEQ_ENUM( \
+                  BOOST_PP_SEQ_FOR_EACH(DLL_FIELD_INITIALIZER, library, fields) \
+              ) \
+        { \
+        } \
+    };
+
+#define DLL_DECLARE_INTERFACE(name, fields) \
+    DLL_DECLARE_INTERFACE_IMPL(name, BOOST_PP_CAT(SEQUENCE_FACTORY_0 fields, _END))
+
+/*
 #define DLL_FUNC_DEF(r, data, elem) \
     std::function <BOOST_PP_SEQ_ELEM(1, elem)> BOOST_PP_SEQ_ELEM(0, elem);
 
@@ -177,3 +272,4 @@ public: \
     { \
     } \
 };
+*/

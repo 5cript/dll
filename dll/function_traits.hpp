@@ -1,7 +1,7 @@
 #pragma once
 
-
 #include <type_traits>
+#include <functional>
 
 namespace LibraryLoader
 {
@@ -27,8 +27,8 @@ namespace LibraryLoader
         using return_type = R; \
     };
 
-    CALLING_CONVENTION_SPECIALIZATION(Stdcall, __stdcall);
-    CALLING_CONVENTION_SPECIALIZATION(Cdecl, __cdecl);
-    CALLING_CONVENTION_SPECIALIZATION(DefaultCall, );
+    CALLING_CONVENTION_SPECIALIZATION(Stdcall, __stdcall)
+    CALLING_CONVENTION_SPECIALIZATION(Cdecl, __cdecl)
+    CALLING_CONVENTION_SPECIALIZATION(DefaultCall, )
 }
 
