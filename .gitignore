@@ -7,3 +7,6 @@ dll.cbp
 *.layout
 main.i
 *_build_log.html
+__history/
+*.astcache
+config.json
