@@ -5,11 +5,15 @@
 #include <windows.h>
 #include <dbghelp.h>
 
+#include <locale>
+#include <codecvt>
 #include <stdexcept>
+#include <cstdlib>
 #include <iomanip>
 #include <unordered_map>
-
 #include <iostream>
+
+#include <boost/lexical_cast.hpp>
 
 // boost pp
 #include <boost/preprocessor/seq/for_each.hpp>
@@ -41,7 +45,7 @@ namespace LibraryLoader
     };
 
     class Library
-    {
+	{
     public:
         friend BOOL CALLBACK ::_SymProc_(
             PSYMBOL_INFO symInfo,
@@ -54,13 +58,26 @@ namespace LibraryLoader
          *  If the construction fails, GetLastError contains why.
          */
         Library(std::string const& library)
-            : filename_{library}
-            , dll_{LoadLibrary(library.c_str())}
+			: filename_{library}
+#ifdef UNICODE
+			, dll_{}
+#else
+			, dll_{LoadLibrary(library.c_str())}
+#endif
             , symbols_{}
-        {
+		{
+#ifdef UNICODE
+			std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+			std::wstring wlib = converter.from_bytes(library);
+			dll_ = LoadLibrary(wlib.c_str());
+#endif
+
             if (dll_ == nullptr)
-            {
-                throw std::invalid_argument("could not load dll specified - code: " + std::to_string(GetLastError()));
+			{
+				auto lastError = GetLastError();
+				throw std::invalid_argument(
+					(std::string("could not load dll specified - code: ") + boost::lexical_cast <std::string> (lastError)).c_str()
+				);
             }
         }
 
