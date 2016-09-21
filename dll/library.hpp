@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <dbghelp.h>
 
+#pragma option(link, "dbghelp.lib")
+
 #include <locale>
 #include <codecvt>
 #include <stdexcept>
@@ -57,22 +59,18 @@ namespace LibraryLoader
         /**
          *  If the construction fails, GetLastError contains why.
          */
-        Library(std::string const& library)
-			: filename_{library}
 #ifdef UNICODE
-			, dll_{}
+		Library(std::wstring const& library)
 #else
+		Library(std::string const& library)
+#endif
+			: filename_{library}
 			, dll_{LoadLibrary(library.c_str())}
-#endif
-            , symbols_{}
+			, symbols_{}
 		{
-#ifdef UNICODE
-			std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-			std::wstring wlib = converter.from_bytes(library);
-			dll_ = LoadLibrary(wlib.c_str());
-#endif
+			dll_ = LoadLibrary(library.c_str());
 
-            if (dll_ == nullptr)
+            if (dll_ == NULL)
 			{
 				auto lastError = GetLastError();
 				throw std::invalid_argument(
@@ -86,7 +84,7 @@ namespace LibraryLoader
          *  Not useful at the moment.
          */
         void loadSymbols()
-        {
+		{
             symbols_.clear();
 
             HANDLE process = GetCurrentProcess();
@@ -98,10 +96,14 @@ namespace LibraryLoader
             if (!status)
                 throw std::runtime_error("call to SymInitialize failed");
 
-            dllBase = SymLoadModuleEx(
+#ifdef UNICODE
+			dllBase = SymLoadModuleExW(
+#else
+			dllBase = SymLoadModuleExA(
+#endif
                 process,
                 nullptr,
-                filename_.c_str(),
+				filename_.c_str(),
                 nullptr,
                 0,
                 0,
@@ -135,13 +137,26 @@ namespace LibraryLoader
 
         /**
          *  Returns a function pointer to a dll function.
-         */
-        template <typename T, typename CallConvention = DefaultCall>
-        typename FunctionPointerType <T, CallConvention>::type get(std::string const& functionName)
-        {
-            return (typename FunctionPointerType <T, CallConvention>::type) (
-                GetProcAddress(dll_, functionName.c_str())
+		 */
+		template <typename T, typename CallConvention = DefaultCall>
+		typename FunctionPointerType <T, CallConvention>::type get(std::string const& functionName)
+		{
+			auto addr = GetProcAddress(dll_, functionName.c_str());
+			if (addr == nullptr)
+				throw std::invalid_argument("could not get proc address of function");
+			return (typename FunctionPointerType <T, CallConvention>::type) (
+				addr
             );
+		}
+
+        // Use loadSymbols first for this to be filled.
+#ifdef UNICODE
+		std::unordered_map <std::wstring, Symbol>& getSymbols()
+#else
+		std::unordered_map <std::string, Symbol>& getSymbols()
+#endif
+		{
+			return symbols_;
         }
 
         // 'Library' has shared semantics, do not copy.
@@ -158,16 +173,36 @@ namespace LibraryLoader
         }
 
     private: // member functions
-        void addSymbol(std::string const& name, Symbol&& symbol)
-        {
-            symbols_[name] = std::move(symbol);
-        }
+#ifdef UNICODE
+		void addSymbol(std::wstring const& name, Symbol&& symbol)
+#else
+		void addSymbol(std::string const& name, Symbol&& symbol)
+#endif
+		{
+			symbols_[name] = std::move(symbol);
+		}
+
+#ifdef UNICODE
+		void addSymbol(std::string const& name, Symbol&& symbol)
+		{
+            std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+			symbols_[converter.from_bytes(name)] = std::move(symbol);
+		}
+#endif
 
     private:
-        std::string filename_;
+#ifdef UNICODE
+		std::wstring filename_;
+#else
+		std::string filename_;
+#endif
         HMODULE dll_;
 
-        std::unordered_map <std::string, Symbol> symbols_;
+#ifdef UNICODE
+		std::unordered_map <std::wstring, Symbol> symbols_;
+#else
+		std::unordered_map <std::string, Symbol> symbols_;
+#endif
     };
 
 
@@ -207,7 +242,7 @@ BOOL CALLBACK _SymProc_(
     PVOID context)
 {
     auto* ctx = static_cast <LibraryLoader::Library*>(context);
-    ctx->addSymbol(symInfo->Name, {*symInfo, symbolSize});
+	ctx->addSymbol(symInfo->Name, {*symInfo, symbolSize});
     return true;
 }
 
